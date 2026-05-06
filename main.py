@@ -1,82 +1,90 @@
-import logging
-from registro_ventas import (
-    Cliente, 
-    ReservaSala, 
-    AlquilerEquipo, 
-    Reserva, 
-    SoftwareFJError
+import logging  # Línea 1: Importación estándar sin caracteres ocultos
+from abc import ABC, abstractmethod
+
+# Configuración del Sistema de Logs de Software FJ
+logging.basicConfig(
+    filename='software_fj.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-def imprimir_encabezado():
-    """Muestra la identidad del desarrollador y del sistema."""
-    print("=" * 60)
-    print("SISTEMA DE GESTIÓN INTEGRAL - SOFTWARE FJ")
-    print("Desarrollado por: YEIRON MORA") # Firma solicitada
-    print("=" * 60)
-    print("\nIniciando simulación de 10 operaciones...\n")
+# --- EXCEPCIONES PERSONALIZADAS ---
+class SoftwareFJError(Exception):
+    """Clase base para errores del sistema Yeiron Mora."""
+    pass
 
-def ejecutar_sistema():
-    imprimir_encabezado()
+class ValidacionDatoError(SoftwareFJError):
+    """Error para datos inválidos o parámetros faltantes."""
+    pass
 
-    # 1. Configuración de datos maestros (Listas internas)
-    try:
-        cliente_a = Cliente("C-01", "Yeiron Mora", "yeiron@softwarefj.com")
-        cliente_b = Cliente("C-02", "Corporación Global", "info@global.com")
-        
-        servicios = [
-            ReservaSala("S-01", "Sala de Juntas VIP", 80.0),
-            AlquilerEquipo("E-01", "Estación de Trabajo G9", 45.0)
-        ]
-    except Exception as e:
-        logging.critical(f"Error al inicializar datos: {e}")
-        print(f"Fallo crítico inicial: {e}")
-        return
+# --- CLASES BASE (ABSTRACCIÓN) ---
+class Entidad(ABC):
+    def __init__(self, id_entidad):
+        self._id = id_entidad
 
-    # 2. Definición de Operaciones (Mezcla de éxitos y fallos controlados)
-    # Formato: (ID, Cliente, Servicio, Cantidad, Argumentos Extras)
-    operaciones = [
-        ("V-101", cliente_a, servicios[0], 5, {"limpieza": True}),    # OK
-        ("V-102", cliente_b, servicios[1], 2, {"seguro": True}),     # OK
-        ("V-103", cliente_a, servicios[1], -1, {}),                  # ERROR: Cantidad negativa
-        ("V-104", "Dato Corrupto", servicios[0], 10, {}),            # ERROR: Tipo de dato
-        ("V-105", cliente_b, servicios[0], 4, {"limpieza": False}),  # OK
-        ("V-106", cliente_a, servicios[1], 0, {}),                   # ERROR: Cantidad cero
-        ("V-107", None, servicios[1], 3, {}),                        # ERROR: Cliente nulo
-        ("V-108", cliente_b, servicios[1], 7, {"seguro": False}),    # OK
-        ("V-109", cliente_a, servicios[0], 2, {"limpieza": True}),   # OK
-        ("V-110", cliente_b, servicios[1], 1, {"seguro": True}),     # OK
-    ]
+    @property
+    def id(self):
+        return self._id
 
-    # 3. Procesamiento Robusto
-    ventas_exitosas = 0
-    monto_total = 0.0
+    @abstractmethod
+    def __str__(self):
+        pass
 
-    for id_v, cli, serv, cant, extras in operaciones:
+# --- CLASE CLIENTE (ENCAPSULACIÓN) ---
+class Cliente(Entidad):
+    def __init__(self, id_cliente, nombre, correo):
+        super().__init__(id_cliente)
+        # Validación estricta de datos
+        if not nombre or "@" not in str(correo):
+            raise ValidacionDatoError(f"Datos de cliente inválidos: {nombre}")
+        self.__nombre = nombre  # Atributo privado
+        self.__correo = correo
+
+    def __str__(self):
+        return f"Cliente: {self.__nombre} (ID: {self.id})"
+
+# --- CLASES DE SERVICIO (HERENCIA Y POLIMORFISMO) ---
+class Servicio(Entidad, ABC):
+    def __init__(self, id_servicio, nombre, costo_base):
+        super().__init__(id_servicio)
+        self.nombre = nombre
+        self.costo_base = costo_base
+
+    @abstractmethod
+    def calcular_total(self, cantidad, **kwargs):
+        pass
+
+class ReservaSala(Servicio):
+    def calcular_total(self, horas, limpieza=False):
+        return (self.costo_base * horas) + (35 if limpieza else 0)
+
+class AlquilerEquipo(Servicio):
+    def calcular_total(self, dias, seguro=True):
+        tasa = 1.12 if seguro else 1.0
+        return (self.costo_base * dias) * tasa
+
+# --- CLASE RESERVA (MANEJO DE EXCEPCIONES) ---
+class Reserva:
+    def __init__(self, id_reserva, cliente, servicio, duracion, **kwargs):
+        self.id_reserva = id_reserva
+        self.cliente = cliente
+        self.servicio = servicio
+        self.duracion = duracion
+        self.extras = kwargs
+
+    def procesar(self):
         try:
-            # Creación del objeto Reserva
-            reserva = Reserva(id_v, cli, serv, cant, **extras)
-            # Ejecución del procesamiento con polimorfismo
-            monto = reserva.procesar()
-            
-            monto_total += monto
-            ventas_exitosas += 1
-            
+            # Validaciones de seguridad
+            if not isinstance(self.cliente, Cliente):
+                raise ValidacionDatoError("El cliente no es un objeto válido.")
+            if self.duracion <= 0:
+                raise ValueError("La duración debe ser positiva.")
+
+            # Polimorfismo en acción
+            monto = self.servicio.calcular_total(self.duracion, **self.extras)
+            logging.info(f"Venta {self.id_reserva} exitosa por ${monto}")
+            return monto
+
         except Exception as e:
-            # Captura cualquier error, lo registra en log y permite continuar
-            logging.warning(f"Operación {id_v} saltada. Motivo: {e}")
-            print(f"--> [AVISO] La operación {id_v} falló pero el sistema continúa.")
-        
-        finally:
-            print("-" * 50)
-
-    # 4. Cierre y Resultados
-    print("\n" + "=" * 60)
-    print("FINALIZACIÓN DEL PROCESO")
-    print(f"Operaciones totales procesadas con éxito: {ventas_exitosas}/10")
-    print(f"Recaudación total: ${monto_total:,.2f}")
-    print(f"Firma del responsable: YEIRON MORA") # Firma de salida
-    print("=" * 60)
-    print("Detalles técnicos almacenados en: software_fj.log")
-
-if __name__ == "__main__":
-    ejecutar_sistema()
+            logging.error(f"Error en {self.id_reserva}: {e}")
+            raise  # Permite que el main gestione la continuidad
