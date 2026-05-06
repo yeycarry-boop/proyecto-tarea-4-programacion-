@@ -1,0 +1,171 @@
+import logging
+from abc import ABC, abstractmethod
+from datetime import datetime
+
+# Configuración del Sistema de Logs (Archivo de registro de eventos y errores)
+logging.basicConfig(
+    filename='software_fj.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# --- EXCEPCIONES PERSONALIZADAS ---
+class SoftwareFJError(Exception):
+    """Clase base para excepciones del sistema."""
+    pass
+
+class DatoInvalidoError(SoftwareFJError):
+    """Se lanza cuando los datos de entrada no cumplen el formato."""
+    pass
+
+class ServicioNoDisponibleError(SoftwareFJError):
+    """Se lanza cuando un servicio no puede ser procesado."""
+    pass
+
+# --- CLASES BASE Y ABSTRACCIÓN ---
+class EntidadBase(ABC):
+    """Clase abstracta que representa una entidad general con ID único."""
+    def __init__(self, id_entidad):
+        self._id_entidad = id_entidad
+
+    @property
+    def id_entidad(self):
+        return self._id_entidad
+
+    @abstractmethod
+    def obtener_detalles(self):
+        pass
+
+# --- GESTIÓN DE CLIENTES ---
+class Cliente(EntidadBase):
+    def __init__(self, id_cliente, nombre, email):
+        super().__init__(id_cliente)
+        self.__nombre = nombre # Encapsulamiento privado
+        self.__email = self.__validar_email(email)
+
+    def __validar_email(self, email):
+        if "@" not in email:
+            raise DatoInvalidoError(f"Email inválido: {email}")
+        return email
+
+    def obtener_detalles(self):
+        return f"Cliente: {self.__nombre} (ID: {self.id_entidad})"
+
+# --- JERARQUÍA DE SERVICIOS (POLIMORFISMO) ---
+class Servicio(EntidadBase, ABC):
+    def __init__(self, id_servicio, nombre_servicio, costo_base):
+        super().__init__(id_servicio)
+        self.nombre_servicio = nombre_servicio
+        self.costo_base = costo_base
+
+    @abstractmethod
+    def calcular_costo(self, duracion, **kwargs):
+        """Método abstracto para polimorfismo."""
+        pass
+
+class ReservaSalas(Servicio):
+    def calcular_costo(self, duracion, limpieza=False):
+        # Sobrecarga lógica: costo base + limpieza opcional
+        total = self.costo_base * duracion
+        if limpieza:
+            total += 50
+        return total
+
+class AlquilerEquipos(Servicio):
+    def calcular_costo(self, duracion, seguro=True):
+        # Sobrecarga lógica: costo por día + seguro obligatorio/opcional
+        tasa_seguro = 1.15 if seguro else 1.0
+        return (self.costo_base * duracion) * tasa_seguro
+
+class AsesoriaEspecializada(Servicio):
+    def calcular_costo(self, duracion, nivel="Senior"):
+        # Polimorfismo basado en el tipo de consultor
+        multiplicadores = {"Junior": 1.0, "Senior": 1.5, "Expert": 2.0}
+        mult = multiplicadores.get(nivel, 1.0)
+        return (self.costo_base * duracion) * mult
+
+# --- GESTIÓN DE RESERVAS ---
+class Reserva:
+    def __init__(self, id_reserva, cliente, servicio, duracion, **kwargs):
+        self.id_reserva = id_reserva
+        self.cliente = cliente
+        self.servicio = servicio
+        self.duracion = duracion
+        self.extra_args = kwargs
+        self.estado = "Pendiente"
+
+    def procesar_reserva(self):
+        try:
+            print(f"--- Procesando Reserva #{self.id_reserva} ---")
+            if self.duracion <= 0:
+                raise ValueError("La duración debe ser mayor a cero.")
+            
+            costo = self.servicio.calcular_costo(self.duracion, **self.extra_args)
+            self.estado = "Confirmada"
+            logging.info(f"Reserva {self.id_reserva} EXITOSA. Costo: ${costo}")
+            print(f"Reserva exitosa para {self.cliente.obtener_detalles()}. Total: ${costo}")
+
+        except ValueError as e:
+            logging.error(f"Error de cálculo en Reserva {self.id_reserva}: {e}")
+            self.estado = "Fallida"
+            # Encadenamiento de excepciones
+            raise ServicioNoDisponibleError("No se pudo procesar por inconsistencia de datos") from e
+        except Exception as e:
+            logging.critical(f"Error inesperado en Reserva {self.id_reserva}: {e}")
+            self.estado = "Error de Sistema"
+        else:
+            print("Verificación de disponibilidad completada sin errores.")
+        finally:
+            print(f"Estado final de la operación: {self.estado}\n")
+
+# --- SIMULACIÓN DEL SISTEMA (10 OPERACIONES) ---
+def ejecutar_simulacion():
+    clientes = []
+    servicios = [
+        ReservaSalas("S1", "Sala de Conferencias", 100),
+        AlquilerEquipos("E1", "Laptop Workstation", 30),
+        AsesoriaEspecializada("A1", "Consultoría Cloud", 200)
+    ]
+
+    print("=== INICIANDO SISTEMA DE GESTIÓN SOFTWARE FJ ===\n")
+
+    # Operaciones Mezcladas (Válidas e Inválidas)
+    operaciones = [
+        ("C", "Juan Perez", "juan@mail.com"),      # 1. Cliente válido
+        ("C", "Error User", "mail_sin_arroba"),   # 2. Cliente inválido (Error)
+        ("R", 0, 0, 5, {"limpieza": True}),       # 3. Reserva válida (Sala)
+        ("R", 0, 1, -2, {}),                      # 4. Reserva inválida (Duración negativa)
+        ("R", 0, 2, 3, {"nivel": "Expert"}),      # 5. Reserva válida (Asesoría)
+        ("C", "Maria Lopez", "maria@mail.com"),    # 6. Cliente válido
+        ("R", 1, 1, 10, {"seguro": False}),       # 7. Reserva válida (Equipo)
+        ("R", 1, 0, 2, {"limpieza": "Mucho"}),    # 8. Parámetro inesperado (Manejado por POO)
+        ("R", 0, 99, 5, {}),                      # 9. Servicio inexistente (Error de índice)
+        ("R", 1, 2, 4, {"nivel": "Senior"}),      # 10. Reserva válida final
+    ]
+
+    for i, op in enumerate(operaciones):
+        try:
+            tipo = op[0]
+            if tipo == "C":
+                c = Cliente(f"CL{i}", op[1], op[2])
+                clientes.append(c)
+                print(f"Operación {i+1}: Cliente registrado con éxito.")
+            
+            elif tipo == "R":
+                idx_cli = op[1]
+                idx_ser = op[2]
+                res = Reserva(f"RES{i}", clientes[idx_cli], servicios[idx_ser], op[3], **op[4])
+                res.procesar_reserva()
+
+        except IndexError:
+            logging.warning(f"Op {i+1}: Intento de acceso a servicio o cliente no existente.")
+            print(f"Operación {i+1}: Error - Referencia de datos no encontrada.")
+        except SoftwareFJError as e:
+            logging.error(f"Op {i+1}: Error controlado de negocio: {e}")
+            print(f"Operación {i+1}: Error de validación detectado.")
+        except Exception as e:
+            logging.error(f"Op {i+1}: Error fatal: {e}")
+            print(f"Operación {i+1}: El sistema recuperó estabilidad tras un error grave.")
+
+if __name__ == "__main__":
+    ejecutar_simulacion()
